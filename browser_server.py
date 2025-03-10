@@ -55,7 +55,12 @@ def execute_js_in_browser(code: str) -> Dict[str, Any]:
 # MCP Tools
 @mcp.tool()
 async def execute_javascript(code: str, ctx: Context) -> str:
-    """Execute arbitrary JavaScript code in the browser and return the result"""
+    """Execute arbitrary JavaScript code in the browser and return the result. There is a web server running that hosts a page that is loaded in a browser. 
+This page executes the javascript code you supply and returns the result. This allows you to manipulate the page using javascript code you write.
+You could for example read the content of the page, add new elements to the page, fill out forms, etc. Anything that can be accomplished via executing javascript code.
+When you use this tool, write javascript code that will return the results of the execution. DO NOT just console.log the results, return them which will allow you
+to read and use them.
+Do not do anything evil or malicious with this tool."""
     result = execute_js_in_browser(code)
     
     if "error" in result and result["error"]:
