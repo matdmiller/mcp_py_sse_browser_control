@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser MCP Server</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #connection-status {
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        #log-container {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            font-family: monospace;
+            margin-bottom: 20px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .timestamp {
+            color: #6c757d;
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Browser MCP Server</h1>
+    
+    <div id="connection-status" class="disconnected">
+        SSE Connection: Disconnected
+    </div>
+    
+    <h2>JavaScript Execution Log</h2>
+    <div id="log-container"></div>
+
+    <script>
+        // Log function to both console and UI
+        function logToUI(message) {
+            const logContainer = document.getElementById('log-container');
+            const timestamp = new Date().toISOString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.innerHTML = `<span class="timestamp">${timestamp}</span>: ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            console.log(`${timestamp}: ${message}`);
+        }
+        
+        // Update connection status
+        function updateConnectionStatus(connected, heartbeatCount) {
+            const statusElement = document.getElementById('connection-status');
+            if (connected) {
+                statusElement.className = 'connected';
+                statusElement.textContent = `SSE Connection: Connected (Heartbeat: ${heartbeatCount})`;
+            } else {
+                statusElement.className = 'disconnected';
+                statusElement.textContent = 'SSE Connection: Disconnected';
+            }
+            return `Connection status updated to: ${connected ? 'Connected' : 'Disconnected'}`;
+        }
+        
+        // Handle SSE events
+        let eventSource;
+        
+        function connectSSE() {
+            eventSource = new EventSource('/events');
+            
+            eventSource.onopen = () => {
+                updateConnectionStatus(true, 0);
+                logToUI('SSE connection established');
+            };
+            
+            eventSource.onerror = (error) => {
+                updateConnectionStatus(false, 0);
+                logToUI(`SSE connection error: ${error.type}, reconnecting...`);
+                if (eventSource.readyState === EventSource.CLOSED) {
+                    eventSource.close();
+                    setTimeout(connectSSE, 3000);  // Reconnect after 3 seconds
+                }
+            };
+            
+            eventSource.addEventListener('eval', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (!data.is_heartbeat) {
+                        logToUI(`Executing JavaScript: ${data.code}`);
+                    }
+                    
+                    try {
+                        // Execute the JavaScript code
+                        const result = eval(data.code);
+                        
+                        // Send the result back to the server (unless it's a heartbeat)
+                        if (!data.is_heartbeat) {
+                            fetch('/result', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    id: data.id,
+                                    result: result
+                                })
+                            }).catch(err => {
+                                logToUI(`Error sending result: ${err.message}`);
+                            });
+                        }
+                    } catch (error) {
+                        logToUI(`Error executing JavaScript: ${error.message}`);
+                        
+                        // Send error back to server
+                        if (!data.is_heartbeat) {
+                            fetch('/result', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    id: data.id,
+                                    result: `Error: ${error.message}`
+                                })
+                            }).catch(err => {
+                                logToUI(`Error sending result: ${err.message}`);
+                            });
+                        }
+                    }
+                } catch (parseError) {
+                    logToUI(`Error parsing event data: ${parseError.message}`);
+                }
+            });
+        }
+        
+        // Connect to SSE when page loads
+        window.addEventListener('load', connectSSE);
+        
+        // Reconnect if we lose connection
+        window.addEventListener('online', () => {
+            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                connectSSE();
+            }
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>
