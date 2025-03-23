@@ -6,6 +6,9 @@ from typing import AsyncIterator, Dict, Any
 from mcp.server.fastmcp import FastMCP, Context
 from web_server import WebServer
 
+WEB_SERVER_HOST = "0.0.0.0"
+WEB_SERVER_PORT = 8000
+
 # Global state to track the web server
 class ServerState:
     web_server = None
@@ -17,7 +20,7 @@ state = ServerState()
 async def mcp_lifespan(server: FastMCP) -> AsyncIterator[None]:
     # Only start the web server if it's not already running
     if not state.server_started:
-        web_server = WebServer()
+        web_server = WebServer(host=WEB_SERVER_HOST, port=WEB_SERVER_PORT)
         web_server.start()
         state.web_server = web_server
         state.server_started = True
@@ -40,7 +43,7 @@ def execute_js_in_browser(code: str) -> Dict[str, Any]:
     """Execute JavaScript in the browser and return the result synchronously"""
     try:
         response = httpx.post(
-            "http://127.0.0.1:8000/execute_js",
+            f"http://{WEB_SERVER_HOST}:{WEB_SERVER_PORT}/execute_js",
             json={"code": code},
             timeout=5
         )
@@ -55,12 +58,42 @@ def execute_js_in_browser(code: str) -> Dict[str, Any]:
 # MCP Tools
 @mcp.tool()
 async def execute_javascript(code: str, ctx: Context) -> str:
-    """Execute arbitrary JavaScript code in the browser and return the result. There is a web server running that hosts a page that is loaded in a browser. 
-This page executes the javascript code you supply and returns the result. This allows you to manipulate the page using javascript code you write.
-You could for example read the content of the page, add new elements to the page, fill out forms, etc. Anything that can be accomplished via executing javascript code.
-When you use this tool, write javascript code that will return the results of the execution. DO NOT just console.log the results, return them which will allow you
-to read and use them.
-Do not do anything evil or malicious with this tool."""
+    """Execute arbitrary JavaScript code in the browser and return the result.
+    
+    There is a web server running that hosts a page that is loaded in a browser.
+    This page executes the JavaScript code you supply and returns the result.
+    
+    EXECUTION CONTEXT:
+    Your code is automatically wrapped in an anonymous function like this:
+    ```javascript
+    (function() {
+        // Your code goes here
+        ${data.code}
+    })()
+    ```
+    
+    This means:
+    1. You MUST use an explicit return statement to send results back
+    2. Your return statement will be properly evaluated within this function scope
+    3. All variables you declare are local to this function
+    4. If you return a Promise, it will be automatically awaited
+    
+    The code is executed in a real browser environment with full DOM access.
+    You can manipulate the page using JavaScript: read content, add elements,
+    fill out forms, click buttons, etc.
+    
+    Examples:
+        - `return document.title;` → returns the page title
+        - `const links = Array.from(document.querySelectorAll('a')).map(a => a.href); return links;` → returns all links
+        - `const el = document.createElement('div'); el.textContent = 'New element'; document.body.appendChild(el); return 'Element added';`
+    
+    IMPORTANT:
+    - DO NOT just use console.log() for results - they won't be returned to you
+    - Results are serialized to JSON when possible, or converted to string
+    - If your code returns a Promise, it will be automatically awaited
+    
+    Do not do anything evil or malicious with this tool.
+    """
     result = execute_js_in_browser(code)
     
     if "error" in result and result["error"]:

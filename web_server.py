@@ -116,12 +116,25 @@ HTML_CONTENT = """
                 heartbeatEl.textContent = 'Last heartbeat: ' + new Date().toLocaleTimeString();
             });
             
-            eventSource.addEventListener('execute_js', function(event) {
+            eventSource.addEventListener('execute_js', async function(event) {
                 const data = JSON.parse(event.data);
                 console.log('Executing JavaScript:', data.code);
                 
                 try {
-                    const result = eval(data.code);
+                    // Wrap the code in an anonymous function and execute it immediately
+                    let result = (new Function(`
+                        return (async function() {
+                            try {
+                                const result = (async () => { ${data.code} })();
+                                return await result;
+                            } catch (e) {
+                                throw e;
+                            }
+                        })();
+                    `))();
+                    
+                    result = await result;
+                    
                     fetch('/js_result', {
                         method: 'POST',
                         headers: {
